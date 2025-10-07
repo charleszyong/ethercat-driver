@@ -20,13 +20,14 @@ cd /path/to/myactuator_ethercat_sdk
 make
 ```
 
-### 3. Find Network Interface
+### 3. Run (Auto-Detect)
 ```bash
-ip link show
-# Look for interface connected to motor (e.g., eth0, enp0s3)
+sudo ./motor_control
 ```
 
-### 4. Run
+The program will automatically find the interface with the motor.
+
+**Or specify interface manually:**
 ```bash
 sudo ./motor_control eth0
 ```

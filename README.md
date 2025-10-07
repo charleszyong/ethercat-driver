@@ -42,14 +42,16 @@ This creates the `motor_control` executable.
 
 ### Usage
 
-1. **Find your network interface:**
+#### Option 1: Auto-Detect Interface (Recommended)
+
 ```bash
-ip link show
+sudo ./motor_control
 ```
 
-Look for your EtherCAT network interface (e.g., `eth0`, `enp0s3`, etc.)
+The program will automatically scan all network interfaces and find the one with the EtherCAT motor connected.
 
-2. **Run the motor control:**
+#### Option 2: Specify Interface Manually
+
 ```bash
 sudo ./motor_control <interface>
 ```
@@ -59,7 +61,13 @@ Example:
 sudo ./motor_control eth0
 ```
 
-3. **Stop the motor:**
+To find available interfaces:
+```bash
+ip link show
+```
+
+#### Stop the Motor
+
 Press `Ctrl+C` to gracefully stop the motor.
 
 ### What It Does

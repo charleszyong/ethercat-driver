@@ -6,8 +6,14 @@
  *   gcc motor_control.c -I/path/to/SOEM/soem -L/path/to/SOEM/build/lib -lsoem -pthread -lrt -o motor_control
  *
  * Run:
- *   sudo ./motor_control <network_interface>
- *   Example: sudo ./motor_control eth0
+ *   sudo ./motor_control [network_interface]
+ *
+ *   Without interface argument: Auto-detects interface with EtherCAT slave
+ *   With interface: Uses specified interface
+ *
+ *   Examples:
+ *     sudo ./motor_control          # Auto-detect
+ *     sudo ./motor_control eth0     # Use eth0
  */
 
 #include <stdio.h>
@@ -17,6 +23,8 @@
 #include <time.h>
 #include <pthread.h>
 #include <signal.h>
+#include <ifaddrs.h>
+#include <net/if.h>
 #include "ethercat.h"
 
 // Motor vendor/product from ESI
@@ -59,6 +67,91 @@ void signal_handler(int sig)
     printf("\nStopping...\n");
 }
 
+/**
+ * Auto-detect network interface with EtherCAT slave
+ * Returns interface name in static buffer, or NULL if not found
+ */
+char* detect_ethercat_interface(void)
+{
+    static char detected_interface[16];
+    struct ifaddrs *ifaddr, *ifa;
+    int found = 0;
+
+    printf("Auto-detecting EtherCAT interface...\n");
+    printf("================================\n");
+
+    // Get list of network interfaces
+    if (getifaddrs(&ifaddr) == -1)
+    {
+        perror("getifaddrs");
+        return NULL;
+    }
+
+    // Try each interface
+    for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next)
+    {
+        if (ifa->ifa_addr == NULL)
+            continue;
+
+        // Skip loopback and non-ethernet interfaces
+        if (strncmp(ifa->ifa_name, "lo", 2) == 0)
+            continue;
+        if (strncmp(ifa->ifa_name, "veth", 4) == 0)
+            continue;
+        if (strncmp(ifa->ifa_name, "docker", 6) == 0)
+            continue;
+        if (strncmp(ifa->ifa_name, "br-", 3) == 0)
+            continue;
+
+        // Only try physical/ethernet interfaces
+        if (!(ifa->ifa_flags & IFF_UP))
+            continue;
+
+        printf("  Trying %s... ", ifa->ifa_name);
+        fflush(stdout);
+
+        // Try to initialize EtherCAT on this interface
+        if (ec_init(ifa->ifa_name))
+        {
+            // Try to find slaves
+            int slaves = ec_config_init(FALSE);
+
+            if (slaves > 0)
+            {
+                printf("✓ Found %d slave(s)!\n", slaves);
+                printf("    Slave: %s\n", ec_slave[1].name);
+
+                // Found it!
+                strncpy(detected_interface, ifa->ifa_name, sizeof(detected_interface) - 1);
+                detected_interface[sizeof(detected_interface) - 1] = '\0';
+                found = 1;
+
+                ec_close();
+                break;
+            }
+            else
+            {
+                printf("no slaves\n");
+                ec_close();
+            }
+        }
+        else
+        {
+            printf("failed to open\n");
+        }
+    }
+
+    freeifaddrs(ifaddr);
+
+    if (found)
+    {
+        printf("\n✓ Detected interface: %s\n", detected_interface);
+        return detected_interface;
+    }
+
+    return NULL;
+}
+
 // Calculate 10 RPM in pulses/second
 // Formula from manual: RPM = (pulses * 60) / 131072
 // Therefore: pulses = RPM * 131072 / 60
@@ -81,15 +174,32 @@ int main(int argc, char *argv[])
     // Setup signal handler
     signal(SIGINT, signal_handler);
 
-    // Check arguments
+    // Auto-detect or use specified interface
     if (argc < 2)
     {
-        printf("Usage: %s <network_interface>\n", argv[0]);
-        printf("Example: %s eth0\n", argv[0]);
-        return 1;
-    }
+        // No interface specified - auto-detect
+        printf("No interface specified, auto-detecting...\n\n");
+        ifname = detect_ethercat_interface();
 
-    ifname = argv[1];
+        if (ifname == NULL)
+        {
+            printf("\n❌ No EtherCAT interface found!\n");
+            printf("\nTroubleshooting:\n");
+            printf("  - Check EtherCAT cable is connected\n");
+            printf("  - Verify motor power is on\n");
+            printf("  - Try specifying interface manually: %s <interface>\n", argv[0]);
+            printf("  - List interfaces: ip link show\n");
+            return 1;
+        }
+
+        printf("\n");
+    }
+    else
+    {
+        // Use specified interface
+        ifname = argv[1];
+        printf("Using specified interface: %s\n", ifname);
+    }
 
     printf("MyActuator Motor Control - SOEM\n");
     printf("================================\n");
